@@ -140,22 +140,50 @@ function About() {
 function ToolPage({ tool, onBack }) {
   const [files, setFiles] = useState([]);
   const [dragging, setDragging] = useState(false);
+  const [dragIndex, setDragIndex] = useState(null);
   const [status, setStatus] = useState(null);
+  const [previewUrls, setPreviewUrls] = useState([]);
   const [options, setOptions] = useState({ range: '1-3', angle: '90', watermark: 'CONFIDENTIAL', opacity: '0.22', position: 'bottom-center', margin: '24', note: 'Reviewed with PDFNest', signer: 'Signed with PDFNest' });
   const inputRef = useRef(null);
 
+  useEffect(() => {
+    if (tool.action !== 'images') {
+      setPreviewUrls([]);
+      return undefined;
+    }
+    const next = files.map((file) => ({ file, url: URL.createObjectURL(file) }));
+    setPreviewUrls(next);
+    return () => next.forEach(({ url }) => URL.revokeObjectURL(url));
+  }, [files, tool.action]);
+
   const addFiles = (incoming) => {
-    const accepted = [...incoming].filter((file) => {
+    const incomingFiles = [...incoming];
+    const accepted = incomingFiles.filter((file) => {
       if (tool.accept === 'image/*') return file.type.startsWith('image/');
       const extensions = tool.accept.split(',').map((value) => value.trim().replace('.', ''));
       return extensions.some((extension) => file.name.toLowerCase().endsWith(`.${extension}`));
     });
-    if (accepted.length < [...incoming].length) setStatus({ type: 'error', text: `Please add a supported file type: ${tool.accept.replaceAll('.', '').toUpperCase()}.` });
+    if (accepted.length < incomingFiles.length) setStatus({ type: 'error', text: `Please add a supported file type: ${tool.accept.replaceAll('.', '').toUpperCase()}.` });
     setFiles((current) => [...current, ...accepted].slice(0, tool.action === 'merge' || tool.action === 'images' ? 20 : 2));
     setStatus(null);
   };
 
   const setOption = (key, value) => setOptions((current) => ({ ...current, [key]: value }));
+  const reorderFiles = (from, to) => {
+    if (from === null || from === to || to === null) return;
+    setFiles((current) => {
+      const reordered = [...current];
+      const [moved] = reordered.splice(from, 1);
+      reordered.splice(to, 0, moved);
+      return reordered;
+    });
+    setDragIndex(null);
+  };
+  const moveFile = (index, offset) => {
+    const destination = Math.max(0, Math.min(files.length - 1, index + offset));
+    reorderFiles(index, destination);
+  };
+  const removeFile = (index) => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
 
   const runTool = async () => {
     if (!files.length) return;
@@ -193,8 +221,12 @@ function ToolPage({ tool, onBack }) {
   };
 
   const showOption = (key, label, type = 'text', extra = {}) => <label className="option-label">{label}<input type={type} value={options[key]} onChange={(event) => setOption(key, event.target.value)} {...extra} /></label>;
+  const multiFileTool = tool.action === 'merge' || tool.action === 'images';
 
-  return <main className="tool-page"><div className="tool-breadcrumb"><button onClick={onBack}>All tools</button><span> / {tool.category} / {tool.title}</span></div><div className="tool-layout"><section><div className="tool-intro"><span className="eyebrow">{tool.category} tool</span><h1>{tool.title}</h1><p>{tool.description} Add your file below and PDFNest will keep the supported operation on this device.</p></div><div className="tool-workbench"><div className={`dropzone ${dragging ? 'dragging' : ''}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }}><div><div className="drop-icon">↑</div><h3>Drop your file{tool.action === 'merge' || tool.action === 'images' ? 's' : ''} here</h3><p>or choose from your device · max 20 files</p><input ref={inputRef} className="file-input" type="file" multiple={tool.action === 'merge' || tool.action === 'images'} accept={tool.accept} onChange={(event) => addFiles(event.target.files)} /><button className="upload-button" onClick={() => inputRef.current?.click()}>Choose file{tool.action === 'merge' || tool.action === 'images' ? 's' : ''}</button></div></div>{files.length > 0 && <div className="file-list">{files.map((file, index) => <div className="file-row" key={`${file.name}-${index}`}><span className="file-type">{file.name.split('.').pop().toUpperCase().slice(0, 4)}</span><div className="file-meta"><div className="file-name">{file.name}</div><div className="file-size">{formatBytes(file.size)}</div></div><button className="remove-file" aria-label={`Remove ${file.name}`} onClick={() => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index))}>×</button></div>)}</div>}
+  return <main className="tool-page"><div className="tool-breadcrumb"><button onClick={onBack}>All tools</button><span> / {tool.category} / {tool.title}</span></div><div className="tool-layout"><section><div className="tool-intro"><span className="eyebrow">{tool.category} tool</span><h1>{tool.title}</h1><p>{tool.description} Add your file below and PDFNest will keep the supported operation on this device.</p></div><div className="tool-workbench"><div className={`dropzone ${dragging ? 'dragging' : ''}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }}><div><div className="drop-icon">↑</div><h3>Drop your file{multiFileTool ? 's' : ''} here</h3><p>or choose from your device · max 20 files</p><input ref={inputRef} className="file-input" type="file" multiple={multiFileTool} accept={tool.accept} onChange={(event) => addFiles(event.target.files)} /><button className="upload-button" onClick={() => inputRef.current?.click()}>Choose file{multiFileTool ? 's' : ''}</button></div></div>
+      {tool.action === 'images' && files.length > 0 && <div className="preview-heading"><div><strong>Arrange your images</strong><span>Drag cards to change the PDF order.</span></div><span className="preview-count">{files.length} {files.length === 1 ? 'image' : 'images'}</span></div>}
+      {tool.action === 'images' && files.length > 0 && <div className="image-preview-grid" aria-label="Image preview and order">{previewUrls.map(({ file, url }, index) => <div className={`preview-card ${dragIndex === index ? 'dragging' : ''}`} key={`${file.name}-${index}`} draggable onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderFiles(dragIndex, index)}><div className="preview-media"><img src={url} alt={`Preview of ${file.name}`} /><span className="preview-order">{index + 1}</span></div><div className="preview-card-footer"><div className="preview-name" title={file.name}>{file.name}</div><div className="preview-meta">{formatBytes(file.size)}</div><div className="preview-actions"><button disabled={index === 0} aria-label={`Move ${file.name} earlier`} onClick={() => moveFile(index, -1)}>↑</button><button disabled={index === files.length - 1} aria-label={`Move ${file.name} later`} onClick={() => moveFile(index, 1)}>↓</button><button className="preview-remove" aria-label={`Remove ${file.name}`} onClick={() => removeFile(index)}>×</button></div></div></div>)}</div>}
+      {files.length > 0 && tool.action !== 'images' && <div className="file-list">{files.map((file, index) => <div className="file-row" key={`${file.name}-${index}`} draggable={multiFileTool} onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderFiles(dragIndex, index)}><span className="file-type">{file.name.split('.').pop().toUpperCase().slice(0, 4)}</span><div className="file-meta"><div className="file-name">{file.name}</div><div className="file-size">{formatBytes(file.size)}</div></div>{multiFileTool && <div className="file-reorder"><button disabled={index === 0} aria-label={`Move ${file.name} earlier`} onClick={() => moveFile(index, -1)}>↑</button><button disabled={index === files.length - 1} aria-label={`Move ${file.name} later`} onClick={() => moveFile(index, 1)}>↓</button></div>}<button className="remove-file" aria-label={`Remove ${file.name}`} onClick={() => removeFile(index)}>×</button></div>)}</div>}
       {['split', 'organize'].includes(tool.action) && <div className="option-grid">{showOption('range', tool.action === 'split' ? 'Pages to extract' : 'Page order', 'text', { placeholder: '1-3, 5' })}</div>}
       {tool.action === 'rotate' && <div className="option-grid">{showOption('angle', 'Rotation', 'number', { min: 90, max: 270, step: 90 })}</div>}
       {tool.action === 'watermark' && <div className="option-grid">{showOption('watermark', 'Watermark text')}{showOption('opacity', 'Opacity', 'number', { min: 0.05, max: 1, step: 0.05 })}</div>}
@@ -202,9 +234,8 @@ function ToolPage({ tool, onBack }) {
       {tool.action === 'crop' && <div className="option-grid">{showOption('margin', 'Margin to trim', 'number', { min: 1, max: 200 })}</div>}
       {tool.action === 'annotate' && <div className="option-grid">{showOption('note', 'Note to add')}</div>}
       {tool.action === 'sign' && <div className="option-grid">{showOption('signer', 'Signature line')}</div>}
-      <div className="run-row"><small>{tool.supported || tool.action === 'markdown' ? 'Runs locally · nothing is uploaded' : 'UI ready · processing adapter planned'}</small><button className="run-button" disabled={!files.length || status?.type === 'working'} onClick={runTool}>{status?.type === 'working' ? 'Working…' : tool.supported || tool.action === 'markdown' ? 'Process file' : 'Prepare tool'}</button></div>{status && status.type !== 'working' && <div className={`status-message ${status.type === 'error' ? 'error' : ''}`}>{status.text}</div>}</div></section><aside className="tool-aside"><h3>Good to know</h3><ul><li><b>01</b><span>Files are kept in memory for supported local tools.</span></li><li><b>02</b><span>You can remove any file from the queue before running.</span></li><li><b>03</b><span>Outputs are downloaded directly to your device.</span></li></ul>{!tool.supported && tool.action !== 'markdown' && <div className="capability-note">This tool is part of the full PDFNest catalog. Its heavier adapter is intentionally separate from the browser-only foundation.</div>}{tool.action === 'markdown' && <div className="capability-note">Text extraction works best when the source PDF already contains selectable text.</div>}</aside></div></main>;
+      <div className="run-row"><small>{tool.supported || tool.action === 'markdown' ? 'Runs locally · nothing is uploaded' : 'UI ready · processing adapter planned'}</small><button className="run-button" disabled={!files.length || status?.type === 'working'} onClick={runTool}>{status?.type === 'working' ? 'Working…' : tool.supported || tool.action === 'markdown' ? 'Process file' : 'Prepare tool'}</button></div>{status && status.type !== 'working' && <div className={`status-message ${status.type === 'error' ? 'error' : ''}`}>{status.text}</div>}</div></section><aside className="tool-aside"><h3>Good to know</h3><ul><li><b>01</b><span>Files are kept in memory for supported local tools.</span></li><li><b>02</b><span>{multiFileTool ? 'Drag cards or use the arrow buttons to set the exact order.' : 'You can remove the queued file before processing.'}</span></li><li><b>03</b><span>Outputs are downloaded directly to your device.</span></li></ul>{!tool.supported && tool.action !== 'markdown' && <div className="capability-note">This tool is part of the full PDFNest catalog. Its heavier adapter is intentionally separate from the browser-only foundation.</div>}{tool.action === 'markdown' && <div className="capability-note">Text extraction works best when the source PDF already contains selectable text.</div>}</aside></div></main>;
 }
-
 export default function App() {
   const route = useRoute();
   const onNavigate = (path) => navigate(path);
