@@ -12,11 +12,13 @@ import {
   loadPdfJs,
   mergePdfs,
   numberPdf,
+  ocrPdf,
   pdfToDocx,
   pdfToJpgZip,
   pdfToPptx,
   pdfToXlsx,
   readOfficeText,
+  reorderPdf,
   rotatePdf,
   selectPages,
   summarizeText,
@@ -91,7 +93,7 @@ const tools = [
   { id: 'repair-pdf', title: 'Repair PDF', description: 'Attempt recovery of a damaged or partially readable file.', category: 'Optimize', icon: 'repair', accept: '.pdf', supported: true, action: 'resave' },
   { id: 'page-numbers', title: 'Page numbers', description: 'Add clear, consistent numbering to every page.', category: 'Edit', icon: 'numbers', accept: '.pdf', supported: true, action: 'numbers' },
   { id: 'scan-pdf', title: 'Scan to PDF', description: 'A mobile capture flow for turning scans into documents.', category: 'Convert', icon: 'scan', accept: 'image/*', supported: true, action: 'images' },
-  { id: 'ocr-pdf', title: 'OCR PDF', description: 'Make scanned pages searchable and selectable.', category: 'Intelligence', icon: 'ocr', accept: '.pdf', badge: 'beta', action: 'unsupported' },
+  { id: 'ocr-pdf', title: 'OCR PDF', description: 'Make scanned pages searchable and selectable.', category: 'Intelligence', icon: 'ocr', accept: '.pdf', badge: 'beta', supported: true, action: 'ocr' },
   { id: 'compare-pdf', title: 'Compare PDF', description: 'Spot meaningful changes between two document versions.', category: 'Intelligence', icon: 'compare', accept: '.pdf', supported: true, action: 'compare' },
   { id: 'redact-pdf', title: 'Redact PDF', description: 'Permanently cover sensitive details before sharing.', category: 'Security', icon: 'redact', accept: '.pdf', action: 'unsupported' },
   { id: 'crop-pdf', title: 'Crop PDF', description: 'Trim page margins consistently across your document.', category: 'Edit', icon: 'scan', accept: '.pdf', supported: true, action: 'crop' },
@@ -193,6 +195,9 @@ function ToolPage({ tool, onBack }) {
   const [dragIndex, setDragIndex] = useState(null);
   const [status, setStatus] = useState(null);
   const [previewUrls, setPreviewUrls] = useState([]);
+  const [pagePreviews, setPagePreviews] = useState([]);
+  const [pageOrder, setPageOrder] = useState([]);
+  const [pageDragIndex, setPageDragIndex] = useState(null);
   const [options, setOptions] = useState({ range: '1-3', angle: '90', watermark: 'CONFIDENTIAL', opacity: '0.22', position: 'bottom-center', margin: '24', note: 'Reviewed with PDFNest', signer: 'Signed with PDFNest' });
   const inputRef = useRef(null);
   const batchTool = tool.action === 'merge' || tool.action === 'images';
@@ -206,6 +211,40 @@ function ToolPage({ tool, onBack }) {
     const next = files.map((file) => ({ file, url: URL.createObjectURL(file) }));
     setPreviewUrls(next);
     return () => next.forEach(({ url }) => URL.revokeObjectURL(url));
+  }, [files, tool.action]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (tool.action !== 'organize' || !files[0]) {
+      setPagePreviews([]);
+      setPageOrder([]);
+      return undefined;
+    }
+    setStatus({ type: 'working', text: 'Preparing page previews locally…' });
+    (async () => {
+      const pdfjs = await loadPdfJs();
+      const pdf = await pdfjs.getDocument({ data: await files[0].arrayBuffer() }).promise;
+      const previews = [];
+      for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+        const page = await pdf.getPage(pageNumber);
+        const viewport = page.getViewport({ scale: 0.42 });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.ceil(viewport.width);
+        canvas.height = Math.ceil(viewport.height);
+        await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+        previews.push({ pageNumber, url: canvas.toDataURL('image/jpeg', 0.78) });
+        if (cancelled) return;
+      }
+      if (!cancelled) {
+        setPagePreviews(previews);
+        setPageOrder(previews.map(({ pageNumber }) => pageNumber - 1));
+        setStatus(null);
+      }
+    })().catch((error) => {
+      console.error(error);
+      if (!cancelled) setStatus({ type: 'error', text: 'Page previews could not be created. You can still use the page order field.' });
+    });
+    return () => { cancelled = true; };
   }, [files, tool.action]);
 
   const addFiles = (incoming) => {
@@ -236,6 +275,11 @@ function ToolPage({ tool, onBack }) {
     reorderFiles(index, destination);
   };
   const removeFile = (index) => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
+  const reorderPages = (from, to) => {
+    if (from === null || from === to || to === null) return;
+    setPageOrder((current) => { const reordered = [...current]; const [moved] = reordered.splice(from, 1); reordered.splice(to, 0, moved); return reordered; });
+    setPageDragIndex(null);
+  };
 
   const readyToRun = files.length > 0 && (tool.action !== 'compare' || files.length === 2);
 
@@ -248,7 +292,7 @@ function ToolPage({ tool, onBack }) {
       let mime = 'application/pdf';
       if (tool.action === 'merge') { bytes = await mergePdfs(files); filename = 'pdfnest-merged.pdf'; }
       else if (tool.action === 'split') { bytes = await selectPages(files[0], options.range); filename = 'pdfnest-pages.pdf'; }
-      else if (tool.action === 'organize') { bytes = await selectPages(files[0], options.range || '1'); filename = 'pdfnest-organized.pdf'; }
+      else if (tool.action === 'organize') { bytes = await reorderPdf(files[0], pageOrder); filename = 'pdfnest-organized.pdf'; }
       else if (tool.action === 'rotate') { bytes = await rotatePdf(files[0], options.angle); filename = 'pdfnest-rotated.pdf'; }
       else if (tool.action === 'compress') { bytes = await compressPdf(files[0]); filename = 'pdfnest-compressed.pdf'; }
       else if (tool.action === 'watermark') { bytes = await watermarkPdf(files[0], options.watermark, options.opacity); filename = 'pdfnest-watermarked.pdf'; }
@@ -264,6 +308,7 @@ function ToolPage({ tool, onBack }) {
       else if (tool.action === 'officeToPdf') { bytes = await textToPdf(await readOfficeText(files[0]), tool.title); filename = 'pdfnest-converted.pdf'; }
       else if (tool.action === 'resave') { bytes = await compressPdf(files[0]); filename = 'pdfnest-repaired.pdf'; }
       else if (tool.action === 'compare') { const pdfjs = await loadPdfJs(); const left = await getTextFromPdf(files[0], pdfjs); const right = await getTextFromPdf(files[1], pdfjs); const report = await comparePdfText(left, right); downloadBlob(new Blob([report], { type: 'text/markdown' }), 'pdfnest-comparison.md'); setStatus({ type: 'success', text: 'Comparison report downloaded locally.' }); return; }
+      else if (tool.action === 'ocr') { const pdfjs = await loadPdfJs(); const text = await ocrPdf(files[0], pdfjs, (message) => { if (message.progress) setStatus({ type: 'working', text: `${message.status || 'Reading page'} · ${Math.round(message.progress * 100)}%` }); }); downloadBlob(new Blob([text || '_No text was detected._'], { type: 'text/plain' }), 'pdfnest-ocr.txt'); setStatus({ type: 'success', text: 'OCR text downloaded locally. The document stayed on this device.' }); return; }
       else if (tool.action === 'summarize') { const pdfjs = await loadPdfJs(); const summary = summarizeText(await getTextFromPdf(files[0], pdfjs)); downloadBlob(new Blob([summary], { type: 'text/markdown' }), 'pdfnest-summary.md'); setStatus({ type: 'success', text: 'Local summary downloaded. No document was uploaded.' }); return; }
       else if (tool.action === 'forms') { bytes = await addFormField(files[0], 'Fill this field'); filename = 'pdfnest-fillable-form.pdf'; }
       else if (tool.action === 'markdown') {
@@ -289,7 +334,9 @@ function ToolPage({ tool, onBack }) {
       {tool.action === 'images' && files.length > 0 && <div className="preview-heading"><div><strong>Arrange your images</strong><span>Drag cards to change the PDF order.</span></div><span className="preview-count">{files.length} {files.length === 1 ? 'image' : 'images'}</span></div>}
       {tool.action === 'images' && files.length > 0 && <div className="image-preview-grid" aria-label="Image preview and order">{previewUrls.map(({ file, url }, index) => <div className={`preview-card ${dragIndex === index ? 'dragging' : ''}`} key={`${file.name}-${index}`} draggable onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderFiles(dragIndex, index)}><div className="preview-media"><img src={url} alt={`Preview of ${file.name}`} /><span className="preview-order">{index + 1}</span></div><div className="preview-card-footer"><div className="preview-name" title={file.name}>{file.name}</div><div className="preview-meta">{formatBytes(file.size)}</div><div className="preview-actions"><button disabled={index === 0} aria-label={`Move ${file.name} earlier`} onClick={() => moveFile(index, -1)}><Icon name="chevronUp" size={14} /></button><button disabled={index === files.length - 1} aria-label={`Move ${file.name} later`} onClick={() => moveFile(index, 1)}><Icon name="chevronDown" size={14} /></button><button className="preview-remove" aria-label={`Remove ${file.name}`} onClick={() => removeFile(index)}><Icon name="close" size={14} /></button></div></div></div>)}</div>}
       {files.length > 0 && tool.action !== 'images' && <div className="file-list">{files.map((file, index) => <div className="file-row" key={`${file.name}-${index}`} draggable={multiFileTool} onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderFiles(dragIndex, index)}><span className="file-type"><Icon name={file.type.startsWith('image/') ? 'image' : 'file'} size={16} /></span><div className="file-meta"><div className="file-name">{file.name}</div><div className="file-size">{formatBytes(file.size)}</div></div>{multiFileTool && <div className="file-reorder"><button disabled={index === 0} aria-label={`Move ${file.name} earlier`} onClick={() => moveFile(index, -1)}><Icon name="chevronUp" size={14} /></button><button disabled={index === files.length - 1} aria-label={`Move ${file.name} later`} onClick={() => moveFile(index, 1)}><Icon name="chevronDown" size={14} /></button></div>}<button className="remove-file" aria-label={`Remove ${file.name}`} onClick={() => removeFile(index)}><Icon name="close" size={14} /></button></div>)}</div>}
-      {['split', 'organize'].includes(tool.action) && <div className="option-grid">{showOption('range', tool.action === 'split' ? 'Pages to extract' : 'Page order', 'text', { placeholder: '1-3, 5' })}</div>}
+      {tool.action === 'organize' && pagePreviews.length > 0 && <div className="page-preview-heading"><div><strong>Arrange your pages</strong><span>Drag a page card to change the PDF order.</span></div><span className="preview-count">{pagePreviews.length} {pagePreviews.length === 1 ? 'page' : 'pages'}</span></div>}
+      {tool.action === 'organize' && pagePreviews.length > 0 && <div className="page-preview-grid" aria-label="PDF page preview and order">{pageOrder.map((pageIndex, index) => { const preview = pagePreviews[pageIndex]; return <div className={`page-preview-card ${pageDragIndex === index ? 'dragging' : ''}`} key={preview.pageNumber} draggable onDragStart={() => setPageDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderPages(pageDragIndex, index)}><div className="page-preview-media"><img src={preview.url} alt={`Preview of page ${preview.pageNumber}`} /><span className="preview-order">{index + 1}</span></div><div className="page-preview-footer"><span>Original page {preview.pageNumber}</span><div className="preview-actions"><button disabled={index === 0} aria-label="Move page earlier" onClick={() => reorderPages(index, index - 1)}><Icon name="chevronUp" size={14} /></button><button disabled={index === pageOrder.length - 1} aria-label="Move page later" onClick={() => reorderPages(index, index + 1)}><Icon name="chevronDown" size={14} /></button></div></div></div>; })}</div>}
+      {tool.action === 'split' && <div className="option-grid">{showOption('range', 'Pages to extract', 'text', { placeholder: '1-3, 5' })}</div>}
       {tool.action === 'rotate' && <div className="option-grid">{showOption('angle', 'Rotation', 'number', { min: 90, max: 270, step: 90 })}</div>}
       {tool.action === 'watermark' && <div className="option-grid">{showOption('watermark', 'Watermark text')}{showOption('opacity', 'Opacity', 'number', { min: 0.05, max: 1, step: 0.05 })}</div>}
       {tool.action === 'numbers' && <div className="option-grid"><label className="option-label">Position<select value={options.position} onChange={(event) => setOption('position', event.target.value)}><option value="bottom-center">Bottom center</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option><option value="top-center">Top center</option></select></label></div>}

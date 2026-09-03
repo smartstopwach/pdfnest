@@ -67,6 +67,15 @@ export const compressPdf = async (file) => {
   return document.save({ useObjectStreams: true, addDefaultPage: false });
 };
 
+export const reorderPdf = async (file, indices) => {
+  const source = await PDFDocument.load(await readAsArrayBuffer(file), { ignoreEncryption: true });
+  const order = Array.isArray(indices) && indices.length ? indices : source.getPageIndices();
+  const output = await PDFDocument.create();
+  const pages = await output.copyPages(source, order);
+  pages.forEach((page) => output.addPage(page));
+  return output.save({ useObjectStreams: true });
+};
+
 export const rotatePdf = async (file, angle) => {
   const document = await PDFDocument.load(await readAsArrayBuffer(file), { ignoreEncryption: true });
   document.getPages().forEach((page) => page.setRotation(degrees((page.getRotation().angle + Number(angle)) % 360)));
@@ -278,6 +287,28 @@ export const comparePdfText = async (leftText, rightText) => {
     else { if (left[index]) rows.push(`- ${left[index]}`); if (right[index]) rows.push(`+ ${right[index]}`); }
   }
   return rows.join('\n');
+};
+
+export const ocrPdf = async (file, pdfjs, onProgress) => {
+  const { createWorker } = await import('tesseract.js');
+  const worker = await createWorker('eng', 1, { logger: (message) => onProgress?.(message) });
+  const pdf = await pdfjs.getDocument({ data: await readAsArrayBuffer(file) }).promise;
+  let text = '';
+  try {
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const viewport = page.getViewport({ scale: 1.45 });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      const result = await worker.recognize(canvas);
+      text += `Page ${pageNumber}\n\n${result.data.text.trim()}\n\n`;
+    }
+  } finally {
+    await worker.terminate();
+  }
+  return text.trim();
 };
 
 export const summarizeText = (text) => {
