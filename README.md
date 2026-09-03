@@ -25,6 +25,10 @@ npm run build
 npm run preview
 ```
 
+## Deploy on GitHub Pages
+
+Every push to `main` runs the included GitHub Actions workflow and publishes the Vite build to `https://smartstopwach.github.io/pdfnest/`. The Vite base path switches automatically for the project site.
+
 ## Roadmap for the full feature set
 
 1. Add a small API service with sandboxed workers for DOCX/PPTX/XLSX conversion, true compression, PDF/A, repair, and password encryption.
