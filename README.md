@@ -7,9 +7,9 @@ PDFNest is an original, privacy-first PDF toolkit inspired by the usability patt
 - Responsive homepage and tool catalog
 - Search-friendly hash routes for every listed tool
 - Local browser processing for merge, split/extract, rotate, watermark, page numbers, crop, annotate, JPG/PNG to PDF, PDF to JPG, PDF to Word, PDF to PowerPoint, PDF to Excel, simple office/HTML-to-PDF, forms, compare, repair/resave, OCR, summaries, Markdown, and text extraction
-- Drag-and-drop file queue with size/type display, multi-file compare support, and robust error fallback
+- Drag-and-drop file queue with size/type display, multi-file compare support, unlimited app-level batch selection, and robust error fallback
 - Lazy-loaded document adapters so heavier conversions do not slow the home screen
-- No upload server: supported operations keep files in the browser
+- No upload server: supported operations keep files in the browser; practical capacity depends on the browser/device memory
 - Clear capability messaging for integrations that need true PDF encryption, password removal, permanent redaction, or provider-backed translation
 
 ## Run it
