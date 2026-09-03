@@ -10,11 +10,15 @@
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
+    "docx": "^9.7.1",
+    "jszip": "^3.10.1",
+    "mammoth": "^1.12.2",
     "pdf-lib": "latest",
     "pdfjs-dist": "latest",
+    "pptxgenjs": "^4.0.1",
     "react": "latest",
     "react-dom": "latest",
-    "vite": "latest"
-  },
-  "devDependencies": {}
+    "vite": "latest",
+    "xlsx": "^0.18.5"
+  }
 }

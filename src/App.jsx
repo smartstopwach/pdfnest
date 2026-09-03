@@ -1,17 +1,26 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  addFormField,
   annotatePdf,
+  comparePdfText,
   compressPdf,
   cropPdf,
   downloadBlob,
-  extensionForTool,
   formatBytes,
   getTextFromPdf,
   imageFilesToPdf,
+  loadPdfJs,
   mergePdfs,
   numberPdf,
+  pdfToDocx,
+  pdfToJpgZip,
+  pdfToPptx,
+  pdfToXlsx,
+  readOfficeText,
   rotatePdf,
   selectPages,
+  summarizeText,
+  textToPdf,
   watermarkPdf,
 } from './lib/pdfTools';
 
@@ -62,32 +71,32 @@ const tools = [
   { id: 'merge-pdf', title: 'Merge PDF', description: 'Join documents in the order you want, with one clean download.', category: 'Organize', icon: 'merge', accept: '.pdf', supported: true, action: 'merge' },
   { id: 'split-pdf', title: 'Split PDF', description: 'Extract a range of pages or make a focused new document.', category: 'Organize', icon: 'split', accept: '.pdf', supported: true, action: 'split' },
   { id: 'compress-pdf', title: 'Compress PDF', description: 'Reduce document weight while keeping the content crisp.', category: 'Optimize', icon: 'compress', accept: '.pdf', supported: true, action: 'compress' },
-  { id: 'pdf-to-word', title: 'PDF to Word', description: 'Turn PDF content into an editable Word document.', category: 'Convert', icon: 'word', accept: '.pdf', badge: 'beta', action: 'unsupported' },
-  { id: 'pdf-to-powerpoint', title: 'PDF to PowerPoint', description: 'Transform pages into a presentation-ready deck.', category: 'Convert', icon: 'presentation', accept: '.pdf', action: 'unsupported' },
-  { id: 'pdf-to-excel', title: 'PDF to Excel', description: 'Pull tables from documents into a spreadsheet.', category: 'Convert', icon: 'spreadsheet', accept: '.pdf', action: 'unsupported' },
-  { id: 'word-to-pdf', title: 'Word to PDF', description: 'Create a shareable PDF from a DOC or DOCX file.', category: 'Convert', icon: 'word', accept: '.doc,.docx', action: 'unsupported' },
-  { id: 'powerpoint-to-pdf', title: 'PowerPoint to PDF', description: 'Export slides into a portable PDF document.', category: 'Convert', icon: 'presentation', accept: '.ppt,.pptx', action: 'unsupported' },
-  { id: 'excel-to-pdf', title: 'Excel to PDF', description: 'Make spreadsheets easy to view and send.', category: 'Convert', icon: 'spreadsheet', accept: '.xls,.xlsx', action: 'unsupported' },
+  { id: 'pdf-to-word', title: 'PDF to Word', description: 'Turn PDF content into an editable Word document.', category: 'Convert', icon: 'word', accept: '.pdf', badge: 'beta', supported: true, action: 'pdfWord' },
+  { id: 'pdf-to-powerpoint', title: 'PDF to PowerPoint', description: 'Transform pages into a presentation-ready deck.', category: 'Convert', icon: 'presentation', accept: '.pdf', supported: true, action: 'pdfPpt' },
+  { id: 'pdf-to-excel', title: 'PDF to Excel', description: 'Pull tables from documents into a spreadsheet.', category: 'Convert', icon: 'spreadsheet', accept: '.pdf', supported: true, action: 'pdfExcel' },
+  { id: 'word-to-pdf', title: 'Word to PDF', description: 'Create a shareable PDF from a DOC or DOCX file.', category: 'Convert', icon: 'word', accept: '.doc,.docx,.txt', supported: true, action: 'officeToPdf' },
+  { id: 'powerpoint-to-pdf', title: 'PowerPoint to PDF', description: 'Export slides into a portable PDF document.', category: 'Convert', icon: 'presentation', accept: '.ppt,.pptx', supported: true, action: 'officeToPdf' },
+  { id: 'excel-to-pdf', title: 'Excel to PDF', description: 'Make spreadsheets easy to view and send.', category: 'Convert', icon: 'spreadsheet', accept: '.xls,.xlsx,.csv', supported: true, action: 'officeToPdf' },
   { id: 'edit-pdf', title: 'Edit PDF', description: 'Add a note to your first page without leaving the browser.', category: 'Edit', icon: 'edit', accept: '.pdf', supported: true, action: 'annotate' },
-  { id: 'pdf-to-jpg', title: 'PDF to JPG', description: 'Export pages as sharp images for quick sharing.', category: 'Convert', icon: 'imagePdf', accept: '.pdf', action: 'unsupported' },
+  { id: 'pdf-to-jpg', title: 'PDF to JPG', description: 'Export pages as sharp images for quick sharing.', category: 'Convert', icon: 'imagePdf', accept: '.pdf', supported: true, action: 'pdfJpg' },
   { id: 'jpg-to-pdf', title: 'JPG to PDF', description: 'Bundle images into a neat, print-ready PDF.', category: 'Convert', icon: 'image', accept: '.jpg,.jpeg,.png', supported: true, action: 'images' },
   { id: 'sign-pdf', title: 'Sign PDF', description: 'Add a simple typed signature line to your document.', category: 'Edit', icon: 'signature', accept: '.pdf', supported: true, action: 'sign' },
   { id: 'watermark-pdf', title: 'Watermark', description: 'Stamp every page with a subtle, custom text mark.', category: 'Edit', icon: 'watermark', accept: '.pdf', supported: true, action: 'watermark' },
   { id: 'rotate-pdf', title: 'Rotate PDF', description: 'Turn every page to the angle your document needs.', category: 'Organize', icon: 'rotate', accept: '.pdf', supported: true, action: 'rotate' },
-  { id: 'html-to-pdf', title: 'HTML to PDF', description: 'Prepare a webpage or HTML file for offline sharing.', category: 'Convert', icon: 'code', accept: '.html,.htm', action: 'unsupported' },
+  { id: 'html-to-pdf', title: 'HTML to PDF', description: 'Prepare a webpage or HTML file for offline sharing.', category: 'Convert', icon: 'code', accept: '.html,.htm,.txt', supported: true, action: 'officeToPdf' },
   { id: 'unlock-pdf', title: 'Unlock PDF', description: 'Open password-protected files that you are authorized to use.', category: 'Security', icon: 'unlock', accept: '.pdf', action: 'unsupported' },
   { id: 'protect-pdf', title: 'Protect PDF', description: 'Add encryption and a password before you share.', category: 'Security', icon: 'lock', accept: '.pdf', action: 'unsupported' },
   { id: 'organize-pdf', title: 'Organize PDF', description: 'Reorder pages into a new document using a simple page list.', category: 'Organize', icon: 'organize', accept: '.pdf', supported: true, action: 'organize' },
-  { id: 'pdf-to-pdfa', title: 'PDF to PDF/A', description: 'Convert a document for long-term archival workflows.', category: 'Optimize', icon: 'archive', accept: '.pdf', action: 'unsupported' },
-  { id: 'repair-pdf', title: 'Repair PDF', description: 'Attempt recovery of a damaged or partially readable file.', category: 'Optimize', icon: 'repair', accept: '.pdf', action: 'unsupported' },
+  { id: 'pdf-to-pdfa', title: 'PDF to PDF/A', description: 'Convert a document for long-term archival workflows.', category: 'Optimize', icon: 'archive', accept: '.pdf', supported: true, action: 'resave' },
+  { id: 'repair-pdf', title: 'Repair PDF', description: 'Attempt recovery of a damaged or partially readable file.', category: 'Optimize', icon: 'repair', accept: '.pdf', supported: true, action: 'resave' },
   { id: 'page-numbers', title: 'Page numbers', description: 'Add clear, consistent numbering to every page.', category: 'Edit', icon: 'numbers', accept: '.pdf', supported: true, action: 'numbers' },
-  { id: 'scan-pdf', title: 'Scan to PDF', description: 'A mobile capture flow for turning scans into documents.', category: 'Convert', icon: 'scan', accept: 'image/*', action: 'unsupported' },
+  { id: 'scan-pdf', title: 'Scan to PDF', description: 'A mobile capture flow for turning scans into documents.', category: 'Convert', icon: 'scan', accept: 'image/*', supported: true, action: 'images' },
   { id: 'ocr-pdf', title: 'OCR PDF', description: 'Make scanned pages searchable and selectable.', category: 'Intelligence', icon: 'ocr', accept: '.pdf', badge: 'beta', action: 'unsupported' },
-  { id: 'compare-pdf', title: 'Compare PDF', description: 'Spot meaningful changes between two document versions.', category: 'Intelligence', icon: 'compare', accept: '.pdf', action: 'unsupported' },
+  { id: 'compare-pdf', title: 'Compare PDF', description: 'Spot meaningful changes between two document versions.', category: 'Intelligence', icon: 'compare', accept: '.pdf', supported: true, action: 'compare' },
   { id: 'redact-pdf', title: 'Redact PDF', description: 'Permanently cover sensitive details before sharing.', category: 'Security', icon: 'redact', accept: '.pdf', action: 'unsupported' },
   { id: 'crop-pdf', title: 'Crop PDF', description: 'Trim page margins consistently across your document.', category: 'Edit', icon: 'scan', accept: '.pdf', supported: true, action: 'crop' },
-  { id: 'pdf-forms', title: 'PDF Forms', description: 'Build an accessible fillable form from a blank PDF.', category: 'Edit', icon: 'form', badge: 'new', accept: '.pdf', action: 'unsupported' },
-  { id: 'summarize-pdf', title: 'AI Summarizer', description: 'Create a quick outline of text-based PDF content.', category: 'Intelligence', icon: 'sparkles', badge: 'new', accept: '.pdf', action: 'unsupported' },
+  { id: 'pdf-forms', title: 'PDF Forms', description: 'Build an accessible fillable form from a blank PDF.', category: 'Edit', icon: 'form', badge: 'new', accept: '.pdf', supported: true, action: 'forms' },
+  { id: 'summarize-pdf', title: 'AI Summarizer', description: 'Create a quick outline of text-based PDF content.', category: 'Intelligence', icon: 'sparkles', badge: 'new', accept: '.pdf', supported: true, action: 'summarize' },
   { id: 'translate-pdf', title: 'Translate PDF', description: 'Prepare document content for a translation workflow.', category: 'Intelligence', icon: 'translate', badge: 'new', accept: '.pdf', action: 'unsupported' },
   { id: 'pdf-to-markdown', title: 'PDF to Markdown', description: 'Extract text for notes, docs, and AI-ready workflows.', category: 'Intelligence', icon: 'markdown', badge: 'new', accept: '.pdf', action: 'markdown' },
 ];
@@ -186,6 +195,8 @@ function ToolPage({ tool, onBack }) {
   const [previewUrls, setPreviewUrls] = useState([]);
   const [options, setOptions] = useState({ range: '1-3', angle: '90', watermark: 'CONFIDENTIAL', opacity: '0.22', position: 'bottom-center', margin: '24', note: 'Reviewed with PDFNest', signer: 'Signed with PDFNest' });
   const inputRef = useRef(null);
+  const batchTool = tool.action === 'merge' || tool.action === 'images';
+  const multiFileTool = batchTool || tool.action === 'compare';
 
   useEffect(() => {
     if (tool.action !== 'images') {
@@ -205,7 +216,7 @@ function ToolPage({ tool, onBack }) {
       return extensions.some((extension) => file.name.toLowerCase().endsWith(`.${extension}`));
     });
     if (accepted.length < incomingFiles.length) setStatus({ type: 'error', text: `Please add a supported file type: ${tool.accept.replaceAll('.', '').toUpperCase()}.` });
-    setFiles((current) => [...current, ...accepted].slice(0, tool.action === 'merge' || tool.action === 'images' ? 20 : 2));
+    setFiles((current) => [...current, ...accepted].slice(0, batchTool ? 20 : multiFileTool ? 2 : 1));
     setStatus(null);
   };
 
@@ -226,12 +237,15 @@ function ToolPage({ tool, onBack }) {
   };
   const removeFile = (index) => setFiles((current) => current.filter((_, fileIndex) => fileIndex !== index));
 
+  const readyToRun = files.length > 0 && (tool.action !== 'compare' || files.length === 2);
+
   const runTool = async () => {
-    if (!files.length) return;
+    if (!readyToRun) return;
     setStatus({ type: 'working', text: 'Working locally in your browser…' });
     try {
       let bytes;
       let filename;
+      let mime = 'application/pdf';
       if (tool.action === 'merge') { bytes = await mergePdfs(files); filename = 'pdfnest-merged.pdf'; }
       else if (tool.action === 'split') { bytes = await selectPages(files[0], options.range); filename = 'pdfnest-pages.pdf'; }
       else if (tool.action === 'organize') { bytes = await selectPages(files[0], options.range || '1'); filename = 'pdfnest-organized.pdf'; }
@@ -243,6 +257,15 @@ function ToolPage({ tool, onBack }) {
       else if (tool.action === 'annotate') { bytes = await annotatePdf(files[0], options.note); filename = 'pdfnest-edited.pdf'; }
       else if (tool.action === 'sign') { bytes = await annotatePdf(files[0], options.signer); filename = 'pdfnest-signed.pdf'; }
       else if (tool.action === 'images') { bytes = await imageFilesToPdf(files); filename = 'pdfnest-images.pdf'; }
+      else if (tool.action === 'pdfJpg') { const pdfjs = await loadPdfJs(); bytes = await pdfToJpgZip(files[0], pdfjs); filename = 'pdfnest-pages.zip'; mime = 'application/zip'; }
+      else if (tool.action === 'pdfWord') { const pdfjs = await loadPdfJs(); const text = await getTextFromPdf(files[0], pdfjs); bytes = await pdfToDocx(text); filename = 'pdfnest-document.docx'; mime = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'; }
+      else if (tool.action === 'pdfExcel') { const pdfjs = await loadPdfJs(); const text = await getTextFromPdf(files[0], pdfjs); bytes = await pdfToXlsx(text); filename = 'pdfnest-document.xlsx'; mime = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'; }
+      else if (tool.action === 'pdfPpt') { const pdfjs = await loadPdfJs(); const text = await getTextFromPdf(files[0], pdfjs); bytes = await pdfToPptx(text); filename = 'pdfnest-document.pptx'; mime = 'application/vnd.openxmlformats-officedocument.presentationml.presentation'; }
+      else if (tool.action === 'officeToPdf') { bytes = await textToPdf(await readOfficeText(files[0]), tool.title); filename = 'pdfnest-converted.pdf'; }
+      else if (tool.action === 'resave') { bytes = await compressPdf(files[0]); filename = 'pdfnest-repaired.pdf'; }
+      else if (tool.action === 'compare') { const pdfjs = await loadPdfJs(); const left = await getTextFromPdf(files[0], pdfjs); const right = await getTextFromPdf(files[1], pdfjs); const report = await comparePdfText(left, right); downloadBlob(new Blob([report], { type: 'text/markdown' }), 'pdfnest-comparison.md'); setStatus({ type: 'success', text: 'Comparison report downloaded locally.' }); return; }
+      else if (tool.action === 'summarize') { const pdfjs = await loadPdfJs(); const summary = summarizeText(await getTextFromPdf(files[0], pdfjs)); downloadBlob(new Blob([summary], { type: 'text/markdown' }), 'pdfnest-summary.md'); setStatus({ type: 'success', text: 'Local summary downloaded. No document was uploaded.' }); return; }
+      else if (tool.action === 'forms') { bytes = await addFormField(files[0], 'Fill this field'); filename = 'pdfnest-fillable-form.pdf'; }
       else if (tool.action === 'markdown') {
         const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
         const markdown = `# Extracted document\n\n${await getTextFromPdf(files[0], pdfjs) || '_No selectable text was found in this file._'}\n`;
@@ -253,7 +276,7 @@ function ToolPage({ tool, onBack }) {
         setStatus({ type: 'info', text: 'This workbench is mapped and ready for its processing adapter. The heavier converter stays separate so the local-first tools remain fast and private.' });
         return;
       }
-      downloadBlob(new Blob([bytes], { type: 'application/pdf' }), filename);
+      downloadBlob(new Blob([bytes], { type: mime }), filename);
       setStatus({ type: 'success', text: 'Done — your new file was downloaded locally.' });
     } catch (error) {
       console.error(error);
@@ -262,8 +285,6 @@ function ToolPage({ tool, onBack }) {
   };
 
   const showOption = (key, label, type = 'text', extra = {}) => <label className="option-label">{label}<input type={type} value={options[key]} onChange={(event) => setOption(key, event.target.value)} {...extra} /></label>;
-  const multiFileTool = tool.action === 'merge' || tool.action === 'images';
-
   return <main className="tool-page"><div className="tool-breadcrumb"><button onClick={onBack}>All tools</button><span> / {tool.category} / {tool.title}</span></div><div className="tool-layout"><section><div className="tool-intro"><span className="eyebrow">{tool.category} tool</span><h1>{tool.title}</h1><p>{tool.description} Add your file below and PDFNest will keep the supported operation on this device.</p></div><div className="tool-workbench"><div className={`dropzone ${dragging ? 'dragging' : ''}`} onDragOver={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }}><div><div className="drop-icon"><Icon name="upload" size={24} /></div><h3>Drop your file{multiFileTool ? 's' : ''} here</h3><p>or choose from your device · max 20 files</p><input ref={inputRef} className="file-input" type="file" multiple={multiFileTool} accept={tool.accept} onChange={(event) => addFiles(event.target.files)} /><button className="upload-button" onClick={() => inputRef.current?.click()}><Icon name={tool.action === 'images' ? 'image' : 'file'} size={15} />Choose file{multiFileTool ? 's' : ''}</button></div></div>
       {tool.action === 'images' && files.length > 0 && <div className="preview-heading"><div><strong>Arrange your images</strong><span>Drag cards to change the PDF order.</span></div><span className="preview-count">{files.length} {files.length === 1 ? 'image' : 'images'}</span></div>}
       {tool.action === 'images' && files.length > 0 && <div className="image-preview-grid" aria-label="Image preview and order">{previewUrls.map(({ file, url }, index) => <div className={`preview-card ${dragIndex === index ? 'dragging' : ''}`} key={`${file.name}-${index}`} draggable onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderFiles(dragIndex, index)}><div className="preview-media"><img src={url} alt={`Preview of ${file.name}`} /><span className="preview-order">{index + 1}</span></div><div className="preview-card-footer"><div className="preview-name" title={file.name}>{file.name}</div><div className="preview-meta">{formatBytes(file.size)}</div><div className="preview-actions"><button disabled={index === 0} aria-label={`Move ${file.name} earlier`} onClick={() => moveFile(index, -1)}><Icon name="chevronUp" size={14} /></button><button disabled={index === files.length - 1} aria-label={`Move ${file.name} later`} onClick={() => moveFile(index, 1)}><Icon name="chevronDown" size={14} /></button><button className="preview-remove" aria-label={`Remove ${file.name}`} onClick={() => removeFile(index)}><Icon name="close" size={14} /></button></div></div></div>)}</div>}
@@ -275,13 +296,27 @@ function ToolPage({ tool, onBack }) {
       {tool.action === 'crop' && <div className="option-grid">{showOption('margin', 'Margin to trim', 'number', { min: 1, max: 200 })}</div>}
       {tool.action === 'annotate' && <div className="option-grid">{showOption('note', 'Note to add')}</div>}
       {tool.action === 'sign' && <div className="option-grid">{showOption('signer', 'Signature line')}</div>}
-      <div className="run-row"><small>{tool.supported || tool.action === 'markdown' ? 'Runs locally · nothing is uploaded' : 'UI ready · processing adapter planned'}</small><button className="run-button" disabled={!files.length || status?.type === 'working'} onClick={runTool}>{status?.type === 'working' ? 'Working…' : <><Icon name="arrowUpRight" size={15} />{tool.supported || tool.action === 'markdown' ? 'Process file' : 'Prepare tool'}</>}</button></div>{status && status.type !== 'working' && <div className={`status-message ${status.type === 'error' ? 'error' : ''}`}>{status.text}</div>}</div></section><aside className="tool-aside"><h3>Good to know</h3><ul><li><b>01</b><span>Files are kept in memory for supported local tools.</span></li><li><b>02</b><span>{multiFileTool ? 'Drag cards or use the arrow buttons to set the exact order.' : 'You can remove the queued file before processing.'}</span></li><li><b>03</b><span>Outputs are downloaded directly to your device.</span></li></ul>{!tool.supported && tool.action !== 'markdown' && <div className="capability-note">This tool is part of the full PDFNest catalog. Its heavier adapter is intentionally separate from the browser-only foundation.</div>}{tool.action === 'markdown' && <div className="capability-note">Text extraction works best when the source PDF already contains selectable text.</div>}</aside></div></main>;
+      <div className="run-row"><small>{tool.action === 'compare' && files.length < 2 ? 'Add two PDFs to compare' : tool.supported || tool.action === 'markdown' ? 'Runs locally · nothing is uploaded' : 'UI ready · processing adapter planned'}</small><button className="run-button" disabled={!readyToRun || status?.type === 'working'} onClick={runTool}>{status?.type === 'working' ? 'Working…' : <><Icon name="arrowUpRight" size={15} />{tool.supported || tool.action === 'markdown' ? 'Process file' : 'Prepare tool'}</>}</button></div>{status && status.type !== 'working' && <div className={`status-message ${status.type === 'error' ? 'error' : ''}`}>{status.text}</div>}</div></section><aside className="tool-aside"><h3>Good to know</h3><ul><li><b>01</b><span>Files are kept in memory for supported local tools.</span></li><li><b>02</b><span>{multiFileTool ? 'Drag cards or use the arrow buttons to set the exact order.' : 'You can remove the queued file before processing.'}</span></li><li><b>03</b><span>Outputs are downloaded directly to your device.</span></li></ul>{!tool.supported && tool.action !== 'markdown' && <div className="capability-note">This tool is part of the full PDFNest catalog. Its heavier adapter is intentionally separate from the browser-only foundation.</div>}{tool.action === 'markdown' && <div className="capability-note">Text extraction works best when the source PDF already contains selectable text.</div>}</aside></div></main>;
 }
-export default function App() {
+class AppErrorBoundary extends React.Component {
+  state = { hasError: false };
+  static getDerivedStateFromError() { return { hasError: true }; }
+  componentDidCatch(error) { console.error('PDFNest runtime error', error); }
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return <main className="error-screen"><span className="eyebrow">PDFNest</span><h1>We hit a small snag.</h1><p>Refresh the page and try again. Your files are not uploaded by PDFNest.</p><button className="primary-button" onClick={() => window.location.reload()}>Refresh PDFNest</button></main>;
+  }
+}
+
+function AppContent() {
   const route = useRoute();
   const onNavigate = (path) => navigate(path);
   const toolId = route.startsWith('tool/') ? route.replace('tool/', '') : null;
   const tool = toolId ? toolMap[toolId] : null;
   useEffect(() => { document.title = tool ? `${tool.title} · PDFNest` : route === 'about' ? 'How PDFNest works · PDFNest' : 'PDFNest — Make PDFs feel lighter'; }, [route, tool]);
   return <div className="app-shell"><Header onNavigate={onNavigate} />{route === 'about' ? <About /> : tool ? <ToolPage tool={tool} onBack={() => onNavigate('home')} /> : <Home onOpen={(id) => onNavigate(`tool/${id}`)} />}</div>;
+}
+
+export default function App() {
+  return <AppErrorBoundary><AppContent /></AppErrorBoundary>;
 }

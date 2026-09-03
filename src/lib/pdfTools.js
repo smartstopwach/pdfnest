@@ -1,4 +1,5 @@
 import { PDFDocument, degrees, rgb, StandardFonts } from 'pdf-lib';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 export const formatBytes = (bytes) => {
   if (!bytes) return '0 B';
@@ -147,6 +148,152 @@ export const getTextFromPdf = async (file, pdfjs) => {
     text += `${content.items.map((item) => item.str).join(' ')}\n\n`;
   }
   return text.trim();
+};
+
+export const loadPdfJs = async () => {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+  return pdfjs;
+};
+
+export const pdfToJpgZip = async (file, pdfjs, quality = 0.92) => {
+  const { default: JSZip } = await import('jszip');
+  const pdf = await pdfjs.getDocument({ data: await readAsArrayBuffer(file) }).promise;
+  const zip = new JSZip();
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1.5 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', Number(quality)));
+    zip.file(`page-${String(pageNumber).padStart(3, '0')}.jpg`, blob);
+  }
+  return zip.generateAsync({ type: 'blob' });
+};
+
+const wrapText = (text, maxChars = 92) => {
+  const lines = [];
+  String(text || '').split(/\r?\n/).forEach((paragraph) => {
+    const words = paragraph.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) { lines.push(''); return; }
+    let line = '';
+    words.forEach((word) => {
+      if ((line + ' ' + word).trim().length > maxChars && line) { lines.push(line); line = word; }
+      else line = `${line} ${word}`.trim();
+    });
+    lines.push(line);
+  });
+  return lines;
+};
+
+export const textToPdf = async (text, heading = 'PDFNest document') => {
+  const document = await PDFDocument.create();
+  const font = await document.embedFont(StandardFonts.Helvetica);
+  const bold = await document.embedFont(StandardFonts.HelveticaBold);
+  const lines = wrapText(text);
+  let page = document.addPage([595, 842]);
+  let y = 795;
+  page.drawText(heading, { x: 42, y, size: 18, font: bold, color: rgb(0.12, 0.37, 0.31) });
+  y -= 35;
+  for (const line of lines) {
+    if (y < 48) { page = document.addPage([595, 842]); y = 795; }
+    page.drawText(line, { x: 42, y, size: 10.5, font, color: rgb(0.15, 0.18, 0.18) });
+    y -= line ? 16 : 10;
+  }
+  return document.save({ useObjectStreams: true });
+};
+
+export const readOfficeText = async (file) => {
+  const extension = file.name.toLowerCase().split('.').pop();
+  if (extension === 'docx' || extension === 'doc') {
+    const mammoth = await import('mammoth');
+    const result = await mammoth.extractRawText({ arrayBuffer: await readAsArrayBuffer(file) });
+    return result.value;
+  }
+  if (extension === 'xlsx' || extension === 'xls' || extension === 'csv') {
+    const XLSX = await import('xlsx');
+    const workbook = XLSX.read(await readAsArrayBuffer(file), { type: 'array' });
+    return workbook.SheetNames.map((name) => `## ${name}\n\n${XLSX.utils.sheet_to_csv(workbook.Sheets[name])}`).join('\n\n');
+  }
+  if (extension === 'pptx' || extension === 'ppt') {
+    const { default: JSZip } = await import('jszip');
+    const zip = await JSZip.loadAsync(await readAsArrayBuffer(file));
+    const slideNames = Object.keys(zip.files).filter((name) => /^ppt\/slides\/slide\d+\.xml$/.test(name)).sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0]));
+    const slides = [];
+    for (const name of slideNames) {
+      const xml = await zip.files[name].async('text');
+      const words = [...xml.matchAll(/<a:t[^>]*>(.*?)<\/a:t>/g)].map((match) => match[1].replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>'));
+      slides.push(`## ${name.match(/\d+/)[0]}\n\n${words.join(' ')}`);
+    }
+    return slides.join('\n\n');
+  }
+  const raw = await file.text();
+  if (extension === 'html' || extension === 'htm') return raw.replace(/<style[\s\S]*?<\/style>/gi, ' ').replace(/<script[\s\S]*?<\/script>/gi, ' ').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+  return raw;
+};
+
+export const pdfToDocx = async (text) => {
+  const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import('docx');
+  const children = wrapText(text, 110).map((line) => new Paragraph({ children: [new TextRun(line)] }));
+  children.unshift(new Paragraph({ text: 'PDFNest document', heading: HeadingLevel.TITLE }));
+  const document = new Document({ sections: [{ children }] });
+  return Packer.toBlob(document);
+};
+
+export const pdfToXlsx = async (text) => {
+  const XLSX = await import('xlsx');
+  const rows = String(text || '').split(/\r?\n/).filter(Boolean).map((line) => [line]);
+  const sheet = XLSX.utils.aoa_to_sheet(rows.length ? rows : [['No selectable text found']]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, sheet, 'Extracted text');
+  return XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+};
+
+export const pdfToPptx = async (text) => {
+  const module = await import('pptxgenjs');
+  const PptxGenJS = module.default || module;
+  const pptx = new PptxGenJS();
+  pptx.layout = 'LAYOUT_WIDE';
+  const lines = wrapText(text, 88);
+  const chunks = [];
+  for (let i = 0; i < lines.length; i += 20) chunks.push(lines.slice(i, i + 20).join('\n'));
+  (chunks.length ? chunks : ['No selectable text found']).forEach((chunk, index) => {
+    const slide = pptx.addSlide();
+    slide.background = { color: 'F7F6F2' };
+    slide.addText(index === 0 ? 'PDFNest document' : `PDFNest document · ${index + 1}`, { x: 0.65, y: 0.55, w: 11.5, h: 0.45, fontFace: 'Aptos Display', fontSize: 25, bold: true, color: '186B5C' });
+    slide.addText(chunk, { x: 0.7, y: 1.35, w: 11.5, h: 5.4, fontFace: 'Aptos', fontSize: 14, color: '20302F', breakLine: false, margin: 0.05, valign: 'top' });
+  });
+  return pptx.write({ outputType: 'blob' });
+};
+
+export const comparePdfText = async (leftText, rightText) => {
+  const left = String(leftText || '').split(/\r?\n/);
+  const right = String(rightText || '').split(/\r?\n/);
+  const rows = [`# PDF comparison`, '', `Left document: ${left.length} lines`, `Right document: ${right.length} lines`, ''];
+  const max = Math.max(left.length, right.length);
+  for (let index = 0; index < max; index += 1) {
+    if (left[index] === right[index]) rows.push(`  ${left[index] || ''}`);
+    else { if (left[index]) rows.push(`- ${left[index]}`); if (right[index]) rows.push(`+ ${right[index]}`); }
+  }
+  return rows.join('\n');
+};
+
+export const summarizeText = (text) => {
+  const sentences = String(text || '').replace(/\s+/g, ' ').match(/[^.!?]+[.!?]+/g) || [];
+  const summary = sentences.slice(0, 5).map((sentence) => sentence.trim()).join(' ');
+  return `# Local document summary\n\n${summary || 'No selectable text was found in this file.'}\n\n> This is a local extractive summary. No document was uploaded.`;
+};
+
+export const addFormField = async (file, label = 'Your response') => {
+  const document = await PDFDocument.load(await readAsArrayBuffer(file), { ignoreEncryption: true });
+  const page = document.getPages()[0];
+  const form = document.getForm();
+  const field = form.createTextField(`pdfnest_field_${Date.now()}`);
+  field.setText(label);
+  field.addToPage(page, { x: 42, y: 50, width: Math.min(330, page.getWidth() - 84), height: 28, borderWidth: 1, backgroundColor: rgb(0.95, 0.98, 0.96) });
+  return document.save({ useObjectStreams: true });
 };
 
 export const extensionForTool = (toolId) => {

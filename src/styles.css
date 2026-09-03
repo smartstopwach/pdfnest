@@ -189,3 +189,7 @@ h1 { margin: 15px 0 17px; font-size: clamp(42px, 5.4vw, 74px); line-height: .98;
   .run-button { width: 100%; }
   .footer { align-items: flex-start; flex-direction: column; padding-inline: 16px; }
 }
+
+.error-screen { min-height: 70vh; max-width: 650px; margin: 0 auto; padding: 120px 28px; }
+.error-screen h1 { margin: 14px 0; font-size: clamp(42px, 6vw, 68px); }
+.error-screen p { color: var(--muted); line-height: 1.6; margin-bottom: 25px; }
