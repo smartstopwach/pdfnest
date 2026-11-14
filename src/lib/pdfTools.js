@@ -335,3 +335,28 @@ export const extensionForTool = (toolId) => {
   if (toolId === 'pdf-to-powerpoint') return 'pptx';
   return 'pdf';
 };
+
+// This is a best-effort visual replacement for selectable text. PDF content streams
+// are immutable with pdf-lib, so the original glyphs remain underneath the white mask.
+export const replacePdfText = async (file, edits) => {
+  const document = await PDFDocument.load(await readAsArrayBuffer(file), { ignoreEncryption: true });
+  const pages = document.getPages();
+  const activeEdits = (edits || []).filter((item) => item.edited !== item.text);
+  const standardFonts = {};
+  for (const item of activeEdits) {
+    const page = pages[item.pageIndex];
+    if (!page) continue;
+    const key = /bold/i.test(item.fontName || '') ? 'Helvetica-Bold' : /italic|oblique/i.test(item.fontName || '') ? 'Helvetica-Oblique' : 'Helvetica';
+    standardFonts[key] ||= await document.embedFont(StandardFonts[key.replaceAll('-', '')] || StandardFonts.Helvetica);
+    const size = Math.max(4, Math.min(120, Number(item.fontSize) || 12));
+    const x = Number(item.x) || 0;
+    const y = Number(item.y) || 0;
+    const width = Math.max(Number(item.width) || 0, size * 0.35);
+    const height = Math.max(Number(item.height) || 0, size);
+    page.drawRectangle({ x: Math.max(0, x - 1), y: Math.max(0, y - size * 0.28), width: Math.min(width + 3, page.getWidth() - Math.max(0, x - 1)), height: Math.min(height + size * 0.42, page.getHeight() - Math.max(0, y - size * 0.28)), color: rgb(1, 1, 1), opacity: 1, borderWidth: 0 });
+    if (item.edited) {
+      page.drawText(String(item.edited), { x, y, size, font: standardFonts[key], color: rgb(0.08, 0.08, 0.08), maxWidth: Math.max(width, 1), lineHeight: size * 1.15 });
+    }
+  }
+  return document.save({ useObjectStreams: true });
+};
