@@ -10,6 +10,7 @@ import {
   getTextFromPdf,
   imageFilesToPdf,
   loadPdfJs,
+  replacePdfText,
   mergePdfs,
   numberPdf,
   ocrPdf,
@@ -80,6 +81,7 @@ const tools = [
   { id: 'powerpoint-to-pdf', title: 'PowerPoint to PDF', description: 'Export slides into a portable PDF document.', category: 'Convert', icon: 'presentation', accept: '.ppt,.pptx', supported: true, action: 'officeToPdf' },
   { id: 'excel-to-pdf', title: 'Excel to PDF', description: 'Make spreadsheets easy to view and send.', category: 'Convert', icon: 'spreadsheet', accept: '.xls,.xlsx,.csv', supported: true, action: 'officeToPdf' },
   { id: 'edit-pdf', title: 'Edit PDF', description: 'Add a note to your first page without leaving the browser.', category: 'Edit', icon: 'edit', accept: '.pdf', supported: true, action: 'annotate' },
+  { id: 'pdf-content-editor', title: 'PDF Content Editor', description: 'Edit selectable text in your PDF and export a revised copy.', category: 'Edit', icon: 'edit', accept: '.pdf', supported: true, action: 'pdfContent' },
   { id: 'pdf-to-jpg', title: 'PDF to JPG', description: 'Export pages as sharp images for quick sharing.', category: 'Convert', icon: 'imagePdf', accept: '.pdf', supported: true, action: 'pdfJpg' },
   { id: 'jpg-to-pdf', title: 'JPG to PDF', description: 'Bundle images into a neat, print-ready PDF.', category: 'Convert', icon: 'image', accept: '.jpg,.jpeg,.png', supported: true, action: 'images' },
   { id: 'sign-pdf', title: 'Sign PDF', description: 'Add a simple typed signature line to your document.', category: 'Edit', icon: 'signature', accept: '.pdf', supported: true, action: 'sign' },
@@ -198,6 +200,8 @@ function ToolPage({ tool, onBack }) {
   const [pagePreviews, setPagePreviews] = useState([]);
   const [pageOrder, setPageOrder] = useState([]);
   const [pageDragIndex, setPageDragIndex] = useState(null);
+  const [editableItems, setEditableItems] = useState([]);
+  const [editorPage, setEditorPage] = useState(0);
   const [options, setOptions] = useState({ range: '1-3', angle: '90', watermark: 'CONFIDENTIAL', opacity: '0.22', position: 'bottom-center', margin: '24', note: 'Reviewed with PDFNest', signer: 'Signed with PDFNest' });
   const inputRef = useRef(null);
   const batchTool = tool.action === 'merge' || tool.action === 'images';
@@ -247,6 +251,42 @@ function ToolPage({ tool, onBack }) {
     return () => { cancelled = true; };
   }, [files, tool.action]);
 
+  useEffect(() => {
+    let cancelled = false;
+    if (tool.action !== 'pdfContent' || !files[0]) {
+      setEditableItems([]);
+      setEditorPage(0);
+      return undefined;
+    }
+    setEditableItems([]);
+    setStatus({ type: 'working', text: 'Reading selectable text locally…' });
+    (async () => {
+      const pdfjs = await loadPdfJs();
+      const pdf = await pdfjs.getDocument({ data: await files[0].arrayBuffer() }).promise;
+      const found = [];
+      for (let pageIndex = 0; pageIndex < pdf.numPages; pageIndex += 1) {
+        const page = await pdf.getPage(pageIndex + 1);
+        const content = await page.getTextContent();
+        content.items.forEach((item, itemIndex) => {
+          const text = String(item.str || '');
+          if (!text.trim() || !item.transform) return;
+          const [, , , , x, y] = item.transform;
+          const fontSize = Math.max(4, Math.hypot(item.transform[0], item.transform[1]));
+          found.push({ id: `${pageIndex}-${itemIndex}`, pageIndex, text, edited: text, x, y, width: Math.max(item.width || 0, fontSize * 0.35), height: Math.max(item.height || 0, fontSize), fontSize, fontName: content.styles?.[item.fontName]?.fontFamily || item.fontName || '' });
+        });
+        if (cancelled) return;
+      }
+      if (!cancelled) {
+        setEditableItems(found);
+        setStatus(found.length ? null : { type: 'error', text: 'No selectable text was found. Scanned pages need OCR before their text can be edited.' });
+      }
+    })().catch((error) => {
+      console.error(error);
+      if (!cancelled) setStatus({ type: 'error', text: 'Could not read this PDF. It may be encrypted or damaged.' });
+    });
+    return () => { cancelled = true; };
+  }, [files, tool.action]);
+
   const addFiles = (incoming) => {
     const incomingFiles = [...incoming];
     const accepted = incomingFiles.filter((file) => {
@@ -282,7 +322,7 @@ function ToolPage({ tool, onBack }) {
     setPageDragIndex(null);
   };
 
-  const readyToRun = files.length > 0 && (tool.action !== 'compare' || files.length === 2);
+  const readyToRun = files.length > 0 && (tool.action !== 'compare' || files.length === 2) && (tool.action !== 'pdfContent' || editableItems.some((item) => item.edited !== item.text));
 
   const runTool = async () => {
     if (!readyToRun) return;
@@ -300,6 +340,7 @@ function ToolPage({ tool, onBack }) {
       else if (tool.action === 'numbers') { bytes = await numberPdf(files[0], options.position); filename = 'pdfnest-numbered.pdf'; }
       else if (tool.action === 'crop') { bytes = await cropPdf(files[0], options.margin); filename = 'pdfnest-cropped.pdf'; }
       else if (tool.action === 'annotate') { bytes = await annotatePdf(files[0], options.note); filename = 'pdfnest-edited.pdf'; }
+      else if (tool.action === 'pdfContent') { bytes = await replacePdfText(files[0], editableItems); filename = 'pdfnest-content-edited.pdf'; }
       else if (tool.action === 'sign') { bytes = await annotatePdf(files[0], options.signer); filename = 'pdfnest-signed.pdf'; }
       else if (tool.action === 'images') { bytes = await imageFilesToPdf(files); filename = 'pdfnest-images.pdf'; }
       else if (tool.action === 'pdfJpg') { const pdfjs = await loadPdfJs(); bytes = await pdfToJpgZip(files[0], pdfjs); filename = 'pdfnest-pages.zip'; mime = 'application/zip'; }
@@ -335,6 +376,13 @@ function ToolPage({ tool, onBack }) {
       {tool.action === 'images' && files.length > 0 && <div className="preview-heading"><div><strong>Arrange your images</strong><span>Drag cards to change the PDF order.</span></div><span className="preview-count">{files.length} {files.length === 1 ? 'image' : 'images'}</span></div>}
       {tool.action === 'images' && files.length > 0 && <div className="image-preview-grid" aria-label="Image preview and order">{previewUrls.map(({ file, url }, index) => <div className={`preview-card ${dragIndex === index ? 'dragging' : ''}`} key={`${file.name}-${index}`} draggable onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderFiles(dragIndex, index)}><div className="preview-media"><img src={url} alt={`Preview of ${file.name}`} /><span className="preview-order">{index + 1}</span></div><div className="preview-card-footer"><div className="preview-name" title={file.name}>{file.name}</div><div className="preview-meta">{formatBytes(file.size)}</div><div className="preview-actions"><button disabled={index === 0} aria-label={`Move ${file.name} earlier`} onClick={() => moveFile(index, -1)}><Icon name="chevronUp" size={14} /></button><button disabled={index === files.length - 1} aria-label={`Move ${file.name} later`} onClick={() => moveFile(index, 1)}><Icon name="chevronDown" size={14} /></button><button className="preview-remove" aria-label={`Remove ${file.name}`} onClick={() => removeFile(index)}><Icon name="close" size={14} /></button></div></div></div>)}</div>}
       {files.length > 0 && tool.action !== 'images' && <div className="file-list">{files.map((file, index) => <div className="file-row" key={`${file.name}-${index}`} draggable={multiFileTool} onDragStart={() => setDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderFiles(dragIndex, index)}><span className="file-type"><Icon name={file.type.startsWith('image/') ? 'image' : 'file'} size={16} /></span><div className="file-meta"><div className="file-name">{file.name}</div><div className="file-size">{formatBytes(file.size)}</div></div>{multiFileTool && <div className="file-reorder"><button disabled={index === 0} aria-label={`Move ${file.name} earlier`} onClick={() => moveFile(index, -1)}><Icon name="chevronUp" size={14} /></button><button disabled={index === files.length - 1} aria-label={`Move ${file.name} later`} onClick={() => moveFile(index, 1)}><Icon name="chevronDown" size={14} /></button></div>}<button className="remove-file" aria-label={`Remove ${file.name}`} onClick={() => removeFile(index)}><Icon name="close" size={14} /></button></div>)}</div>}
+      {tool.action === 'pdfContent' && files.length > 0 && <div className="content-editor">
+        <div className="content-editor-heading"><div><strong>Text content</strong><span>{editableItems.length ? `${editableItems.length} selectable text blocks · ${new Set(editableItems.map((item) => item.pageIndex)).size} pages` : 'Reading text blocks…'}</span></div>
+          <label className="editor-page-select">Page<select value={editorPage} onChange={(event) => setEditorPage(Number(event.target.value))}>{[...new Set(editableItems.map((item) => item.pageIndex))].map((pageIndex) => <option key={pageIndex} value={pageIndex}>{pageIndex + 1}</option>)}</select></label>
+        </div>
+        {editableItems.filter((item) => item.pageIndex === editorPage).map((item, index) => <label className="editable-text-row" key={item.id}><span>Block {index + 1}{item.fontSize ? ` · ${item.fontSize.toFixed(1)} pt` : ''}</span><textarea value={item.edited} onChange={(event) => setEditableItems((current) => current.map((entry) => entry.id === item.id ? { ...entry, edited: event.target.value } : entry))} rows={Math.min(4, Math.max(1, item.edited.split('\n').length))} /></label>)}
+        <div className="capability-note editor-warning">This browser editor makes best-effort visual replacements. It cannot guarantee the exact embedded font, stroke, spacing, or layout; scanned/image-only pages need OCR. Existing glyph data remains underneath the visual cover, so this is not secure redaction.</div>
+      </div>}
       {tool.action === 'organize' && pagePreviews.length > 0 && <div className="page-preview-heading"><div><strong>Arrange your pages</strong><span>Drag a page card to change the PDF order.</span></div><span className="preview-count">{pagePreviews.length} {pagePreviews.length === 1 ? 'page' : 'pages'}</span></div>}
       {tool.action === 'organize' && pagePreviews.length > 0 && <div className="page-preview-grid" aria-label="PDF page preview and order">{pageOrder.map((pageIndex, index) => { const preview = pagePreviews[pageIndex]; return <div className={`page-preview-card ${pageDragIndex === index ? 'dragging' : ''}`} key={preview.pageNumber} draggable onDragStart={() => setPageDragIndex(index)} onDragOver={(event) => event.preventDefault()} onDrop={() => reorderPages(pageDragIndex, index)}><div className="page-preview-media"><img src={preview.url} alt={`Preview of page ${preview.pageNumber}`} /><span className="preview-order">{index + 1}</span></div><div className="page-preview-footer"><span>Original page {preview.pageNumber}</span><div className="preview-actions"><button disabled={index === 0} aria-label="Move page earlier" onClick={() => reorderPages(index, index - 1)}><Icon name="chevronUp" size={14} /></button><button disabled={index === pageOrder.length - 1} aria-label="Move page later" onClick={() => reorderPages(index, index + 1)}><Icon name="chevronDown" size={14} /></button></div></div></div>; })}</div>}
       {tool.action === 'split' && <div className="option-grid">{showOption('range', 'Pages to extract', 'text', { placeholder: '1-3, 5' })}</div>}

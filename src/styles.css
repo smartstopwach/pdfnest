@@ -204,3 +204,15 @@ h1 { margin: 15px 0 17px; font-size: clamp(42px, 5.4vw, 74px); line-height: .98;
 .error-screen { min-height: 70vh; max-width: 650px; margin: 0 auto; padding: 120px 28px; }
 .error-screen h1 { margin: 14px 0; font-size: clamp(42px, 6vw, 68px); }
 .error-screen p { color: var(--muted); line-height: 1.6; margin-bottom: 25px; }
+
+.content-editor { margin-top: 18px; padding: 16px; border: 1px solid var(--line); border-radius: 12px; background: #fbfdfb; }
+.content-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 13px; }
+.content-editor-heading strong { display: block; color: var(--ink); font-family: Manrope, sans-serif; font-size: 14px; }
+.content-editor-heading span:not(.preview-count) { display: block; color: var(--muted); font-size: 11px; margin-top: 4px; }
+.editor-page-select { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 700; }
+.editor-page-select select { border: 1px solid var(--line); border-radius: 7px; background: white; padding: 7px 10px; color: var(--ink); }
+.editable-text-row { display: block; margin-top: 10px; }
+.editable-text-row > span { display: block; margin-bottom: 5px; color: var(--muted); font-size: 10px; font-weight: 700; }
+.editable-text-row textarea { display: block; width: 100%; min-height: 38px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; background: #fff; color: var(--ink); font-family: inherit; font-size: 13px; line-height: 1.45; outline: none; }
+.editable-text-row textarea:focus { border-color: #94c9b5; box-shadow: 0 0 0 3px #e4f4ea; }
+.editor-warning { margin-top: 14px; }
